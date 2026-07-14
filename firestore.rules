@@ -1,0 +1,51 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // Global safety net - default deny
+    match /{document=**} {
+      allow read, write: if false;
+    }
+    
+    // Global helpers
+    function isValidId(id) {
+      return id is string && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
+    }
+    function incoming() { return request.resource.data; }
+    function existing() { return resource.data; }
+    function isSignedIn() { return request.auth != null; }
+    function isVerifiedUser() {
+      return isSignedIn();
+    }
+    
+    // Session rules
+    match /sessions/{sessionId} {
+      allow get, list: if isVerifiedUser() && isValidId(sessionId);
+      
+      allow create: if isVerifiedUser() &&
+                     isValidId(sessionId) &&
+                     incoming().creatorId == request.auth.uid;
+                     
+      allow update: if isVerifiedUser() &&
+                     isValidId(sessionId) &&
+                     incoming().creatorId == existing().creatorId;
+                     
+      allow delete: if isVerifiedUser() &&
+                     isValidId(sessionId) &&
+                     existing().creatorId == request.auth.uid;
+                     
+      // Subcollection of record rows inside the session
+      match /records/{recordId} {
+        allow get, list: if isVerifiedUser() && isValidId(recordId);
+        
+        allow create: if isVerifiedUser() &&
+                       isValidId(recordId);
+                       
+        allow update: if isVerifiedUser() &&
+                       isValidId(recordId);
+                       
+        allow delete: if isVerifiedUser() &&
+                       isValidId(recordId);
+      }
+    }
+  }
+}

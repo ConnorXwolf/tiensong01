@@ -1,0 +1,100 @@
+{
+  "entities": {
+    "session": {
+      "title": "Collaborative Session",
+      "description": "A collaborative document session shared among multiple users.",
+      "type": "object",
+      "properties": {
+        "code": {
+          "type": "string",
+          "minLength": 4,
+          "maxLength": 16,
+          "pattern": "^[A-Z0-9]+$"
+        },
+        "name": {
+          "type": "string",
+          "maxLength": 100
+        },
+        "creatorId": {
+          "type": "string",
+          "maxLength": 128
+        },
+        "creatorEmail": {
+          "type": "string",
+          "maxLength": 128
+        },
+        "sheetId": {
+          "type": "string",
+          "maxLength": 128
+        },
+        "sheetName": {
+          "type": "string",
+          "maxLength": 100
+        },
+        "activeImage": {
+          "type": "string",
+          "maxLength": 1048576
+        },
+        "activeImageName": {
+          "type": "string",
+          "maxLength": 200
+        },
+        "createdAt": {
+          "type": "object",
+          "format": "google.protobuf.Timestamp"
+        },
+        "updatedAt": {
+          "type": "object",
+          "format": "google.protobuf.Timestamp"
+        }
+      },
+      "required": ["code", "creatorId"]
+    },
+    "record": {
+      "title": "Production Record Row",
+      "description": "An individual production log row in the collaborative session.",
+      "type": "object",
+      "properties": {
+        "client": {
+          "type": "string",
+          "maxLength": 100
+        },
+        "moldId": {
+          "type": "string",
+          "maxLength": 100
+        },
+        "goodQty": {
+          "type": "integer"
+        },
+        "badQty": {
+          "type": "integer"
+        },
+        "workHours": {
+          "type": "number"
+        },
+        "operator": {
+          "type": "string",
+          "maxLength": 100
+        },
+        "order": {
+          "type": "integer"
+        },
+        "updatedAt": {
+          "type": "object",
+          "format": "google.protobuf.Timestamp"
+        }
+      },
+      "required": ["client", "goodQty", "badQty", "workHours", "order"]
+    }
+  },
+  "firestore": {
+    "/sessions/{sessionId}": {
+      "schema": "session",
+      "description": "Collaborative session documents"
+    },
+    "/sessions/{sessionId}/records/{recordId}": {
+      "schema": "record",
+      "description": "Production records inside a session"
+    }
+  }
+}
