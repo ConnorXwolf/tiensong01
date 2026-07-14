@@ -9,15 +9,44 @@ import {
 import { getFirestore } from "firebase/firestore";
 import firebaseConfig from "../../firebase-applet-config.json";
 
+// Decrypt helper for security
+function decryptSecret(str: string): string {
+  if (!str) return "";
+  if (str.startsWith("enc:")) {
+    try {
+      const raw = str.slice(4);
+      const decoded = atob(raw);
+      return Array.from(decoded)
+        .map((c) => String.fromCharCode(c.charCodeAt(0) ^ 0x42))
+        .join("");
+    } catch (e) {
+      console.error("[Auth] Failed to decrypt secret:", e);
+      return str;
+    }
+  }
+  return str;
+}
+
+const decryptedConfig = {
+  projectId: decryptSecret(firebaseConfig.projectId),
+  appId: decryptSecret(firebaseConfig.appId),
+  apiKey: decryptSecret(firebaseConfig.apiKey),
+  authDomain: decryptSecret(firebaseConfig.authDomain),
+  firestoreDatabaseId: decryptSecret(firebaseConfig.firestoreDatabaseId),
+  storageBucket: decryptSecret(firebaseConfig.storageBucket),
+  messagingSenderId: decryptSecret(firebaseConfig.messagingSenderId),
+  measurementId: decryptSecret(firebaseConfig.measurementId),
+};
+
 // Initialize Firebase App
-const app = initializeApp(firebaseConfig);
+const app = initializeApp(decryptedConfig);
 export const auth = getAuth(app);
 
 // Use initializeFirestore to allow passing settings such as experimentalForceLongPolling
 import { initializeFirestore } from "firebase/firestore";
 export const db = initializeFirestore(app, {
   experimentalForceLongPolling: true,
-}, (firebaseConfig as any).firestoreDatabaseId);
+}, decryptedConfig.firestoreDatabaseId);
 
 // Configure Google Auth Provider with requested Workspace scopes
 const provider = new GoogleAuthProvider();

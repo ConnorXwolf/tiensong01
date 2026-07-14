@@ -14,8 +14,27 @@ async function startServer() {
   app.use(express.json({ limit: "15mb" }));
   app.use(express.urlencoded({ limit: "15mb", extended: true }));
 
+  // Helper to decrypt environment variable secrets if they are in the encrypted format
+  function decryptSecret(str: string | undefined): string | undefined {
+    if (!str) return undefined;
+    if (str.startsWith("enc:")) {
+      try {
+        const raw = str.slice(4);
+        const decoded = Buffer.from(raw, "base64").toString("binary");
+        return Array.from(decoded)
+          .map((c) => String.fromCharCode(c.charCodeAt(0) ^ 0x42))
+          .join("");
+      } catch (e) {
+        console.error("[Server] Failed to decrypt secret:", e);
+        return str;
+      }
+    }
+    return str;
+  }
+
   // Initialize Gemini API client
-  const apiKey = process.env.GEMINI_API_KEY;
+  const rawApiKey = process.env.GEMINI_API_KEY;
+  const apiKey = decryptSecret(rawApiKey);
   const ai = apiKey
     ? new GoogleGenAI({
         apiKey: apiKey,
