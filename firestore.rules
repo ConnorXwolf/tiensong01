@@ -19,7 +19,8 @@ service cloud.firestore {
     
     // Session rules
     match /sessions/{sessionId} {
-      allow get, list: if isVerifiedUser() && isValidId(sessionId);
+      allow get: if isVerifiedUser() && isValidId(sessionId);
+      allow list: if isVerifiedUser();
       
       allow create: if isVerifiedUser() &&
                      isValidId(sessionId) &&

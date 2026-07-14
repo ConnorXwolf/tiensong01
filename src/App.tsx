@@ -36,7 +36,8 @@ import {
   SpreadsheetFile,
   listSpreadsheets,
   createSpreadsheet,
-  appendRecords
+  appendRecords,
+  shareSpreadsheetPublicly
 } from "./lib/sheets";
 import {
   createSession,
@@ -347,7 +348,7 @@ export default function App() {
         setNewSheetTitle("");
         setSelectedImage(null);
         setImageFile(null);
-        setAnalysisResult(null);
+        setAnalysisError(null);
         setNeedsAuth(true);
         handleExitSession();
       } catch (err) {
@@ -369,6 +370,14 @@ export default function App() {
     setIsConnectingSession(true);
     setSessionError(null);
     try {
+      if (accessToken) {
+        try {
+          await shareSpreadsheetPublicly(accessToken, target.id);
+        } catch (shareErr) {
+          console.error("Error setting public permissions for existing spreadsheet:", shareErr);
+        }
+      }
+      
       const code = await createSession(user, records, { sheetId: target.id, sheetName: target.name });
       if (code) {
         setCurrentSessionCode(code);
@@ -587,23 +596,30 @@ export default function App() {
 
       const data = await res.json();
       if (data.success && Array.isArray(data.records)) {
-        const recordsWithIds = data.records.map((r: any) => ({
-          id: Math.random().toString(36).substring(2, 9),
-          client: r.client || "",
-          moldId: r.moldId || "",
-          goodQty: typeof r.goodQty === "number" ? r.goodQty : parseInt(r.goodQty) || 0,
-          badQty: typeof r.badQty === "number" ? r.badQty : parseInt(r.badQty) || 0,
-          workHours: typeof r.workHours === "number" ? r.workHours : parseFloat(r.workHours) || 0,
-          operator: r.operator || "",
-        }));
+        const recordsWithIds = data.records.map((r: any) => {
+          const rawGood = r.goodQty !== undefined ? r.goodQty : r.good_qty;
+          const rawBad = r.badQty !== undefined ? r.badQty : r.bad_qty;
+          const rawHours = r.workHours !== undefined ? r.workHours : r.work_hours;
+          
+          return {
+            id: Math.random().toString(36).substring(2, 9),
+            client: r.client || r.customerName || r.customer || "",
+            moldId: r.moldId || r.moldNo || r.moldNumber || "",
+            goodQty: isNaN(Number(rawGood)) ? 0 : Number(rawGood),
+            badQty: isNaN(Number(rawBad)) ? 0 : Number(rawBad),
+            workHours: isNaN(Number(rawHours)) ? 0 : Number(rawHours),
+            operator: r.operator || r.worker || r.workerName || r.name || "",
+          };
+        });
+
+        // Optimistically update local state immediately so it displays instantly on the screen
+        setRecords((prev) => [...prev, ...recordsWithIds]);
 
         if (currentSessionCode) {
           let orderOffset = records.length;
           for (const newRec of recordsWithIds) {
             await saveRecordRow(currentSessionCode, newRec, orderOffset++);
           }
-        } else {
-          setRecords((prev) => [...prev, ...recordsWithIds]);
         }
       } else {
         throw new Error("伺服器回傳格式不正確。");
@@ -620,6 +636,16 @@ export default function App() {
     field: keyof Omit<ProductionRecord, "id">,
     value: any
   ) => {
+    // Optimistically update local state immediately so that typing is perfectly smooth and has no lag
+    setRecords((prev) =>
+      prev.map((rec) => {
+        if (rec.id === id) {
+          return { ...rec, [field]: value };
+        }
+        return rec;
+      })
+    );
+
     if (currentSessionCode) {
       const target = records.find((r) => r.id === id);
       if (target) {
@@ -627,15 +653,6 @@ export default function App() {
         const updated = { ...target, [field]: value };
         await saveRecordRow(currentSessionCode, updated, order);
       }
-    } else {
-      setRecords((prev) =>
-        prev.map((rec) => {
-          if (rec.id === id) {
-            return { ...rec, [field]: value };
-          }
-          return rec;
-        })
-      );
     }
   };
 
@@ -658,29 +675,33 @@ export default function App() {
       workHours: 0,
       operator: "",
     };
+    
+    // Always update local state instantly
+    setRecords((prev) => [...prev, newRow]);
+
     if (currentSessionCode) {
       await saveRecordRow(currentSessionCode, newRow, records.length);
-    } else {
-      setRecords((prev) => [...prev, newRow]);
     }
     setSaveSuccess(false);
   };
 
   const handleRemoveRow = async (id: string) => {
+    // Always update local state instantly
+    setRecords((prev) => prev.filter((rec) => rec.id !== id));
+
     if (currentSessionCode) {
       await deleteRecordRow(currentSessionCode, id);
-    } else {
-      setRecords((prev) => prev.filter((rec) => rec.id !== id));
     }
   };
 
   const handleClearRecords = () => {
     triggerConfirm("清除確認", "確定要清除目前工作列表中的所有紀錄嗎？", async () => {
+      // Always update local state instantly
+      const ids = records.map((r) => r.id);
+      setRecords([]);
+
       if (currentSessionCode) {
-        const ids = records.map((r) => r.id);
         await clearAllRecordsInSession(currentSessionCode, ids);
-      } else {
-        setRecords([]);
       }
     });
   };
@@ -744,7 +765,7 @@ export default function App() {
             </div>
             <div>
               <h1 className="text-xl font-bold font-display text-white tracking-tight flex items-center gap-2">
-                ProductionSync <span className="text-[#71717A] text-xs font-normal bg-[#1F1F22] px-2 py-0.5 rounded-md border border-[#2A2A2E]">v2.4</span>
+                天松工業生產紀錄APP
               </h1>
               <p className="text-xs text-[#71717A] hidden sm:block">
                 智慧 AI 相片辨識 &middot; 統整匯出至 Google 試算表 &middot; 手動調校工具
@@ -775,7 +796,7 @@ export default function App() {
                   <p className="text-xs font-medium text-white leading-none">
                     {user.displayName}
                   </p>
-                  <p className="text-[10px] text-[#71717A] leading-none mt-0.5">
+                  <p className="text-xs text-[#71717A] leading-none mt-0.5">
                     {user.email}
                   </p>
                 </div>
@@ -928,7 +949,7 @@ export default function App() {
                       <h3 className="text-xs uppercase tracking-widest font-bold text-[#A1A1AA]">
                         1. 紀錄表管理
                       </h3>
-                      <p className="text-[10px] text-[#71717A] mt-0.5">開啟、建立或加入編輯</p>
+                      <p className="text-xs text-[#71717A] mt-0.5">開啟、建立或加入編輯</p>
                     </div>
                   </div>
 
@@ -944,7 +965,7 @@ export default function App() {
                       </div>
 
                       <div className="space-y-1">
-                        <span className="text-[10px] text-[#71717A] font-mono block">當前紀錄表名稱</span>
+                        <span className="text-xs text-[#71717A] font-mono block">當前紀錄表名稱</span>
                         <span className="text-xs font-medium text-slate-200 block truncate">
                           {selectedSheet?.name || "共同編輯紀錄表"}
                         </span>
@@ -953,7 +974,7 @@ export default function App() {
                             href={selectedSheet.webViewLink}
                             target="_blank"
                             rel="noopener noreferrer"
-                            className="inline-flex items-center text-[10px] text-[#00E5FF] hover:underline mt-1"
+                            className="inline-flex items-center text-xs text-[#00E5FF] hover:underline mt-1"
                           >
                             <ExternalLink className="w-3 h-3 mr-0.5" />
                             打開 Google Sheets
@@ -962,14 +983,14 @@ export default function App() {
                       </div>
 
                       <div className="bg-[#111114]/80 p-3 rounded-lg border border-[#222228] flex flex-col space-y-1.5 mt-2">
-                        <span className="text-[10px] text-[#71717A] uppercase font-mono">共同編輯 6 位數代碼</span>
+                        <span className="text-xs text-[#71717A] uppercase font-mono">共同編輯 6 位數代碼</span>
                         <div className="flex items-center justify-between gap-2">
                           <span className="text-base font-extrabold text-emerald-400 font-mono tracking-widest bg-emerald-950/40 px-2.5 py-1 rounded border border-emerald-800/30">
                             {currentSessionCode}
                           </span>
                           <button
                             onClick={handleCopyLink}
-                            className="flex items-center space-x-1 px-2 py-1.5 bg-[#1F1F22] hover:bg-[#2A2A2E] text-slate-300 hover:text-white rounded-md text-[10px] font-semibold transition-colors border border-[#2A2A2E] shrink-0"
+                            className="flex items-center space-x-1 px-2 py-1.5 bg-[#1F1F22] hover:bg-[#2A2A2E] text-slate-300 hover:text-white rounded-md text-xs font-semibold transition-colors border border-[#2A2A2E] shrink-0"
                             title="複製分享連結"
                           >
                             {isCopied ? (
@@ -994,7 +1015,7 @@ export default function App() {
                         結束/關閉此紀錄表
                       </button>
 
-                      <p className="text-[10px] text-[#52525B] text-center pt-1.5">
+                      <p className="text-xs text-[#52525B] text-center pt-1.5">
                         若要切換其它紀錄表，請先結束當前編輯。
                       </p>
                     </div>
@@ -1056,7 +1077,7 @@ export default function App() {
 
                       {/* Step 2: Create a new spreadsheet */}
                       <div className="pt-3 border-t border-[#1F1F22] space-y-1.5">
-                        <span className="block text-[11px] text-[#71717A]">找不到檔案？</span>
+                        <span className="block text-xs text-[#71717A]">找不到檔案？</span>
                         <button
                           id="btn-create-sheet-panel"
                           onClick={() => setShowCreateModal(true)}
@@ -1070,7 +1091,7 @@ export default function App() {
                       {/* Step 3: Enter 6-digit Code to Join/Open */}
                       <div className="pt-3.5 border-t border-[#1F1F22] space-y-2">
                         <label className="block text-xs font-semibold text-[#A1A1AA]">
-                          輸入 6 位數代碼開啟或加入共同編輯
+                          輸入 6 位數代碼開啟共同編輯
                         </label>
                         <div className="flex space-x-2">
                           <input
@@ -1097,7 +1118,7 @@ export default function App() {
                   {sessionError && (
                     <div className="mt-3 bg-rose-950/20 border border-rose-900/30 text-rose-400 rounded-lg px-3 py-2.5 text-xs flex items-center space-x-2">
                       <CircleAlert className="w-4 h-4 text-rose-400 shrink-0" />
-                      <span className="text-[11px]">{sessionError}</span>
+                      <span className="text-xs">{sessionError}</span>
                     </div>
                   )}
                 </div>
@@ -1113,7 +1134,7 @@ export default function App() {
                       <h3 className="text-xs uppercase tracking-widest font-bold text-[#A1A1AA]">
                         2. 上傳圖片辨識
                       </h3>
-                      <p className="text-[10px] text-[#71717A] mt-0.5">匯入相片並利用 AI 辨識</p>
+                      <p className="text-xs text-[#71717A] mt-0.5">匯入相片並利用 AI 辨識</p>
                     </div>
                   </div>
 
@@ -1122,14 +1143,14 @@ export default function App() {
                     <div className="py-12 px-4 text-center border border-dashed border-[#1F1F22] rounded-xl bg-[#0A0A0B]/60 flex flex-col items-center justify-center space-y-3">
                       <Lock className="w-8 h-8 text-[#52525B] mb-1" />
                       <h4 className="text-xs font-semibold text-[#E0E0E0]">相片功能尚未啟用</h4>
-                      <p className="text-[11px] text-[#71717A] max-w-[220px] mx-auto leading-relaxed">
+                      <p className="text-xs text-[#71717A] max-w-[220px] mx-auto leading-relaxed">
                         請先在 <strong className="text-indigo-400">[視窗 1]</strong> 選擇開啟紀錄表，或輸入 6 位數代碼開啟以解鎖此功能。
                       </p>
                     </div>
                   ) : (
                     /* Active Upload View */
                     <div className="space-y-4">
-                      <div className="mb-1 px-3 py-2 bg-emerald-950/20 border border-emerald-500/10 rounded-lg text-emerald-400 text-[10px] font-medium flex items-center space-x-2">
+                      <div className="mb-1 px-3 py-2 bg-emerald-950/20 border border-emerald-500/10 rounded-lg text-emerald-400 text-xs font-medium flex items-center space-x-2">
                         <Users className="w-3.5 h-3.5 shrink-0 text-emerald-400 animate-pulse" />
                         <span>上傳相片將即時同步給所有成員</span>
                       </div>
@@ -1174,10 +1195,10 @@ export default function App() {
                               alt="Preview of uploaded factory record sheet"
                               className="max-h-40 mx-auto rounded-lg object-contain shadow-2xl border border-[#1F1F22]"
                             />
-                            <div className="text-[10px] text-[#A1A1AA] font-medium truncate max-w-xs mx-auto">
+                            <div className="text-xs text-[#A1A1AA] font-medium truncate max-w-xs mx-auto">
                               {imageFile?.name}
                             </div>
-                            <p className="text-[9px] text-[#71717A]">
+                            <p className="text-xs text-[#71717A]">
                               點擊或拖曳新圖片以進行更換
                             </p>
                           </div>
@@ -1190,7 +1211,7 @@ export default function App() {
                               <p className="text-xs font-semibold text-[#E0E0E0]">
                                 拖曳相片或點擊上傳
                               </p>
-                              <p className="text-[9px] text-[#71717A]">
+                              <p className="text-xs text-[#71717A]">
                                 PNG, JPG, JPEG, WEBP, HEIC
                               </p>
                             </div>
@@ -1242,14 +1263,14 @@ export default function App() {
 
                       {/* Diagnostics and Error Alerts */}
                       {analysisError && (
-                        <div className="bg-rose-950/30 border border-rose-800/40 rounded-lg p-3 flex items-start space-x-2 text-rose-300 text-[10px] leading-relaxed">
+                        <div className="bg-rose-950/30 border border-rose-800/40 rounded-lg p-3 flex items-start space-x-2 text-rose-300 text-xs leading-relaxed">
                           <CircleAlert className="w-3.5 h-3.5 text-rose-400 shrink-0 mt-0.5" />
                           <span>辨識出錯: {analysisError}。請確保圖片清晰、對焦無偏並重試。</span>
                         </div>
                       )}
 
                       {/* Quick manual tips */}
-                      <div className="bg-[#0E0E10] border border-[#1F1F22] rounded-xl p-3 text-[10px] text-[#71717A] space-y-1">
+                      <div className="bg-[#0E0E10] border border-[#1F1F22] rounded-xl p-3 text-xs text-[#71717A] space-y-1">
                         <div className="flex items-center space-x-1 font-semibold text-slate-300">
                           <Info className="w-3.5 h-3.5 text-[#00E5FF]" />
                           <span>相片辨識提示</span>
@@ -1290,15 +1311,15 @@ export default function App() {
                               <FileText className="w-4 h-4 text-[#00E5FF]" />
                               <span>當前待統整工作列表</span>
                             </h3>
-                            <span className="text-[10px] font-semibold bg-indigo-950/60 text-[#00E5FF] px-2.5 py-0.5 rounded-full border border-indigo-900/40">
+                            <span className="text-xs font-semibold bg-indigo-950/60 text-[#00E5FF] px-2.5 py-0.5 rounded-full border border-indigo-900/40">
                               {records.length} 筆
                             </span>
-                            <span className="text-[10px] font-semibold bg-emerald-500/10 text-emerald-400 px-2 py-0.5 rounded-full border border-emerald-500/20 flex items-center gap-1.5 animate-pulse">
+                            <span className="text-xs font-semibold bg-emerald-500/10 text-emerald-400 px-2 py-0.5 rounded-full border border-emerald-500/20 flex items-center gap-1.5 animate-pulse">
                               <Users className="w-3 h-3 text-emerald-400" />
                               <span>代碼: {currentSessionCode}</span>
                             </span>
                           </div>
-                          <p className="text-[11px] text-[#71717A] mt-1.5">
+                          <p className="text-xs text-[#71717A] mt-1.5">
                             目前開啟紀錄表：<strong className="text-slate-300 font-medium">{selectedSheet?.name}</strong>。此區資料修改將即時同步。
                           </p>
                         </div>
@@ -1340,7 +1361,7 @@ export default function App() {
                         ) : (
                           <table className="w-full text-left border-collapse table-auto min-w-[640px]">
                             <thead>
-                              <tr className="border-b border-[#1F1F22] text-[10px] uppercase tracking-wider font-bold text-[#71717A] bg-[#0E0E10]">
+                              <tr className="border-b border-[#1F1F22] text-xs uppercase tracking-wider font-bold text-[#71717A] bg-[#0E0E10]">
                                 <th className="px-4 py-3">客戶名稱</th>
                                 <th className="px-4 py-3">模具編號</th>
                                 <th className="px-4 py-3">良品數量</th>
@@ -1492,7 +1513,7 @@ export default function App() {
                               <p className="text-xs font-semibold text-white">
                                 準備就緒：即將統整 {records.length} 筆資料
                               </p>
-                              <p className="text-[10px] text-[#A1A1AA] mt-0.5 leading-relaxed">
+                              <p className="text-xs text-[#A1A1AA] mt-0.5 leading-relaxed">
                                 {selectedSheet
                                   ? `目標試算表為「${selectedSheet.name}」，資料將追加至最下方。`
                                   : "未選擇目標試算表，請在上方建立或選取一筆。"}
@@ -1544,7 +1565,7 @@ export default function App() {
                   <Plus className="w-4 h-4 text-[#00E5FF]" />
                   <span>建立新 Google 試算表</span>
                 </h3>
-                <p className="text-[11px] text-[#71717A] mt-1">
+                <p className="text-xs text-[#71717A] mt-1">
                   我們將在您的 Google 雲端硬碟中建立此檔案，並自動初始化包含客戶、模具、工時、良率在內的完整標準欄位。
                 </p>
               </div>
@@ -1679,8 +1700,8 @@ export default function App() {
 
       {/* Global Footer Credits */}
       <footer id="footer-credits" className="bg-[#0E0E10] py-8 border-t border-[#1F1F22] text-center mt-20">
-        <p className="text-[11px] text-[#71717A]">
-          ProductionSync &middot; 整合 Google Workspace 雲端工作技術 &middot; © 2026
+        <p className="text-xs text-[#71717A]">
+          天松工業生產紀錄APP &middot; 整合 Google Workspace 雲端工作技術 &middot; © 2026
         </p>
       </footer>
     </div>

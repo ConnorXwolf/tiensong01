@@ -9,7 +9,9 @@ import {
   query,
   orderBy,
   serverTimestamp,
-  getDocFromServer
+  getDocFromServer,
+  where,
+  getDocs
 } from "firebase/firestore";
 import { User } from "firebase/auth";
 import { db, auth } from "./auth";
@@ -91,6 +93,24 @@ function generateCode(): string {
 }
 
 /**
+ * Find an existing session by sheetId
+ */
+export async function findSessionBySheetId(sheetId: string): Promise<string | null> {
+  const path = "sessions";
+  try {
+    const q = query(collection(db, "sessions"), where("sheetId", "==", sheetId));
+    const querySnapshot = await getDocs(q);
+    if (!querySnapshot.empty) {
+      return querySnapshot.docs[0].id;
+    }
+    return null;
+  } catch (error) {
+    handleFirestoreError(error, OperationType.LIST, path);
+    return null;
+  }
+}
+
+/**
  * Create a new collaborative editing session with the current working records
  */
 export async function createSession(
@@ -98,10 +118,32 @@ export async function createSession(
   records: ProductionRecord[],
   sheetMetadata?: { sheetId: string; sheetName: string }
 ): Promise<string> {
-  const code = generateCode();
-  const path = `sessions/${code}`;
-  
+  if (sheetMetadata?.sheetId) {
+    const existingCode = await findSessionBySheetId(sheetMetadata.sheetId);
+    if (existingCode) {
+      return existingCode;
+    }
+  }
+
+  let code = generateCode();
+  let codeExists = true;
+  let attempts = 0;
+  let path = "";
+
   try {
+    // Check for code collisions (up to 10 attempts)
+    while (codeExists && attempts < 10) {
+      attempts++;
+      const checkDoc = await getDoc(doc(db, "sessions", code));
+      if (!checkDoc.exists()) {
+        codeExists = false;
+      } else {
+        code = generateCode();
+      }
+    }
+
+    path = `sessions/${code}`;
+
     // 1. Create the session metadata document
     const setSessionPromise = setDoc(doc(db, "sessions", code), {
       code,
@@ -122,7 +164,6 @@ export async function createSession(
     // 2. Upload initial record rows
     for (let i = 0; i < records.length; i++) {
       const rec = records[i];
-      const recPath = `sessions/${code}/records/${rec.id}`;
       await setDoc(doc(db, "sessions", code, "records", rec.id), {
         client: rec.client,
         moldId: rec.moldId,

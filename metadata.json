@@ -1,5 +1,5 @@
 {
-  "name": "工廠工時紀錄統整",
+  "name": "天松工業生產紀錄APP",
   "description": "自動識別生產工時紀錄相片，並將客戶、模具、良品數量、不良品數量、工時和工作者等資訊統整至 Google Sheets，支援手動輸入與編輯功能。",
   "requestFramePermissions": [],
   "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]

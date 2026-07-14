@@ -128,7 +128,11 @@ export async function getFirstSheetTitle(accessToken: string, spreadsheetId: str
 
   if (!response.ok) {
     const errData = await response.json().catch(() => ({}));
-    throw new Error(errData?.error?.message || "Failed to fetch spreadsheet details.");
+    const msg = errData?.error?.message || "Failed to fetch spreadsheet details.";
+    if (msg.toLowerCase().includes("permission") || errData?.error?.status === "PERMISSION_DENIED") {
+      throw new Error("Google 試算表權限不足：主機 (Host) 尚未將此試算表設定為「知道連結的人均可編輯」，或是該網域禁止外部存取。請請主機手動至 Google 試算表開放編輯權限。");
+    }
+    throw new Error(msg);
   }
 
   const data = await response.json();
@@ -180,7 +184,11 @@ export async function appendRecords(
 
   if (!response.ok) {
     const errData = await response.json().catch(() => ({}));
-    throw new Error(errData?.error?.message || "Failed to append records to Google Sheet.");
+    const msg = errData?.error?.message || "Failed to append records to Google Sheet.";
+    if (msg.toLowerCase().includes("permission") || errData?.error?.status === "PERMISSION_DENIED") {
+      throw new Error("Google 試算表權限不足：主機 (Host) 尚未將此試算表設定為「知道連結的人均可編輯」，或是該網域禁止外部存取。請請主機手動至 Google 試算表開放編輯權限。");
+    }
+    throw new Error(msg);
   }
 }
 
